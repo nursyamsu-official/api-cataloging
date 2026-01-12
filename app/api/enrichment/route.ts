@@ -9,40 +9,23 @@ export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const category_code = url.searchParams.get("category_code");
   const material_name = url.searchParams.get("material_name");
-  return handleRequest(category_code, material_name);
-}
 
-export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const category_code = body.category_code;
-  const material_name = body.material_name;
-  return handleRequest(category_code, material_name);
-}
-
-async function handleRequest(
-  category_code: string | null,
-  material_name: string | null
-) {
-  if (!category_code || !material_name || material_name.trim() === "") {
+  if (!category_code || !material_name) {
     return NextResponse.json(
-      { error: "Missing or invalid material_name parameter" },
+      { error: "Missing required parameters: category_code and material_name" },
       { status: 400 }
     );
   }
 
   try {
-    let fetchUrl = "https://mmkai.ptsisi.id/api/material_categories/get";
-    if (category_code) {
-      fetchUrl += `?id=${category_code}`;
-    }
-
+    const fetchUrl = `https://mmkai.ptsisi.id/api/material_categories/get?id=${category_code}`;
     const response = await fetch(fetchUrl);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     const data = await response.json();
 
-    // FIRST AI processing
+    // FIRST AI processing: normalize category data
     const systemPrompt = `You are a data normalization engine.
 
 Your task is to transform structured JSON material data into a clean, human-readable attribute list.
@@ -76,7 +59,7 @@ Rules:
 
     const processedData = completion.choices[0].message.content;
 
-    // SECONDARY AI processing
+    // SECONDARY AI processing: assign material_name to suitable category
     const secondaryPrompt = `You are a material enrichment assistant.
 
 You receive:
@@ -85,17 +68,40 @@ You receive:
 
 Produce a JSON array containing exactly one object.
 
-Retain NOUN and MODIFIER if exist, DO NOT CHANGED
+1. Destructure and analyze the Material Name.
+2. Assign the destructured values to suitable categories (attributes).
 
-Then, for each ATTRIBUTE_NAME in the Categories:
-- Standardized Material Name then desctructure based on function or purpose.
-- Analyze the Material Name then map to match a value for that attribute.
-- If a suitable value can be extracted or matched from the Material Name, set the attribute value to that extracted value (apply standard naming conventions like capitalizing words).
-- If no suitable value can be extracted or matched, set the attribute value to "NOT_FOUND".
+Rules:
+1. Output MUST be valid JSON only (no markdown, no explanation).
+2. Output format and field names MUST exactly match the schema provided.
+3. For material_category, status and NOUN DO NOT CHANGED
+4. Use values ONLY if they are:
+   - Explicitly mentioned in material_name, OR
+   - A clear semantic equivalent with the SAME meaning and specification 
+     (e.g. "I5" → "INTEL CORE I5").
+5. DO NOT infer, upgrade, downgrade, approximate, or guess specifications.
+   - Numeric values MUST match exactly (e.g. 4GB ≠ 8GB ≠ 16GB).
+   - If material_name contains e.g. "4 GB" and available options are "8GB DDR4" or "128GB DDR4",
+     the result MUST be "NOT_FOUND".
+6. "Best match" means the most accurate EXACT or SEMANTICALLY EQUIVALENT match,
+   NOT the closest, higher, lower, or similar specification.
+7. If no confident exact or equivalent match exists, output "NOT_FOUND".
+8. Do NOT invent new values.
+9. Normalize text:
+   - Uppercase
+   - Trim spaces
+   - Use commas consistently
+10. If INPUT_TEXT contains a value not listed in ATTRIBUTE_MASTER, still output it if clearly stated (e.g. OS = UBUNTU).
+11. Always return the result as a JSON array with exactly ONE object.
+12. Do not add extra attributes beyond those in the Categories list.
+13. If a numeric value (e.g. memory size, capacity, speed) is explicitly stated in material_name,
+    you MUST return that exact value, even if it does NOT exist in ATTRIBUTE_MASTER.
+    You are STRICTLY FORBIDDEN from replacing it with any available option from ATTRIBUTE_MASTER
+    that has a different numeric value.
+14. Unit normalization (e.g. INCHI → IN, INCH → IN) is allowed
+    ONLY if the numeric value remains EXACTLY the same.
 
-Do not add extra attributes beyond those in the Categories list
-output alway UPPERCASE
-
+Do not add extra attributes beyond those in the Categories list.
 Output only the JSON array, no other text.`;
 
     const secondaryCompletion = await openai.chat.completions.create({
