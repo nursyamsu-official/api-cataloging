@@ -50,7 +50,7 @@ Rules:
 9. Do not explain anything.`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-mini",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: JSON.stringify(data) },
@@ -105,7 +105,7 @@ Do not add extra attributes beyond those in the Categories list.
 Output only the JSON array, no other text.`;
 
     const secondaryCompletion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-mini",
       messages: [
         { role: "system", content: secondaryPrompt },
         {
