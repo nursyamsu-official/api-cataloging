@@ -1,6 +1,6 @@
 export default function Home() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 relative overflow-hidden">
+    <div className="min-h-screen bg-linear-to-br from-gray-900 via-gray-800 to-gray-900 relative overflow-hidden">
       {/* Background with tool patterns - using CSS for tool-like shapes */}
       <div className="absolute inset-0 opacity-10">
         <div className="absolute top-10 left-10 w-16 h-16 bg-yellow-600 rotate-45"></div>
