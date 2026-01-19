@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   if (!material_name || !category_code) {
     return NextResponse.json(
       { error: "Missing required parameters: material_name and category_code" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -37,15 +37,15 @@ export async function GET(request: NextRequest) {
       attributeNames = (data as Attribute[]).map((item) => item.attribute_name);
     } else if (data && Array.isArray(data.data)) {
       attributeNames = (data.data as Attribute[]).map(
-        (item) => item.attribute_name
+        (item) => item.attribute_name,
       );
     } else if (data && data.data && Array.isArray(data.data.attributes)) {
       attributeNames = (data.data.attributes as Attribute[]).map(
-        (item) => item.attribute_name
+        (item) => item.attribute_name,
       );
     } else if (data && Array.isArray(data.attributes)) {
       attributeNames = (data.attributes as Attribute[]).map(
-        (item) => item.attribute_name
+        (item) => item.attribute_name,
       );
     } else if (data && Array.isArray(data.attribute_name)) {
       attributeNames = data.attribute_name as string[];
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
         {
           error: "Invalid data format",
         },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -83,6 +83,7 @@ export async function GET(request: NextRequest) {
             - Output MUST be valid JSON only.
             - Do NOT include markdown, comments, or explanation.
             - Output MUST be a SINGLE flat JSON object.
+            - Output MUST be in english.
             - Each ATTRIBUTE_NAME MUST be a direct key of the root JSON object.
             - Do NOT wrap attributes in an array.
             - Do NOT nest objects.
@@ -120,7 +121,7 @@ export async function GET(request: NextRequest) {
     if (!processedData) {
       return NextResponse.json(
         { error: "No response from Enrichment AI" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -131,14 +132,14 @@ export async function GET(request: NextRequest) {
       console.error("Error parsing secondary AI response:", parseError);
       return NextResponse.json(
         { error: "Failed to process enrichment data" },
-        { status: 500 }
+        { status: 500 },
       );
     }
   } catch (error) {
     console.error("Error fetching material categories:", error);
     return NextResponse.json(
       { error: "Failed to fetch material categories" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
