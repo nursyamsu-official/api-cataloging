@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { prisma } from "../../../lib/prisma";
 
 interface Attribute {
   attribute_name: string;
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    console.log(attributeNames);
+    // console.log(attributeNames);
 
     // START NOUN MODIFIER
     const nounModifierAttributes = data?.data?.attributes;
@@ -90,7 +91,7 @@ export async function GET(request: NextRequest) {
         [item.attribute_name]: item.attribute_value.value,
       }));
 
-    console.log(nounModifier);
+    // console.log(nounModifier);
 
     // END NOUN MODIFIER
 
@@ -124,7 +125,7 @@ export async function GET(request: NextRequest) {
           - INVENTORY
           - ASSET
         - Classification must follow railway maintenance and asset management practice.
-        - Explanation with reason refer to railway industry standard.
+        - Explanation with reason refer to railway industry standards or common railway practice.
 
       3. UNSPSC CLASSIFICATION (v26.0801 — STRICT)
           - Select the most appropriate UNSPSC COMMODITY code
@@ -132,30 +133,62 @@ export async function GET(request: NextRequest) {
           - Explanation with reason must be concise and precise refer to UNSPSC v26.0801
           - Do NOT infer UNSPSC descriptions
           - Only use the provided UNSPSC master data
+          - IF SPRING, use CLASS 31161900 Springs then select ONE the most appropriate UNSPSC COMMODITY CODE:
+            31161901	Helical springs
+            31161902	Leaf springs
+            31161903	Spiral springs
+            31161904	Compression springs
+            31161905	Die springs
+            31161906	Disk springs
+            31161907	Extension springs
+            31161908	Torsion springs
+            31161909	Waveform spring
+            31161910	Wireform spring
+            31161911	Spring assembly
+            31161912	Injector valve spring
+            IF not suitable for SPRING, choose 31161911	Spring assembly
           - If unsure, return UNSPSC_UNCERTAIN
+
+      ATTRIBUTE VALUE FORMATTING RULES (CRITICAL):
+      - ATTRIBUTE_VALUE must be in UPPERCASE
+      - ATTRIBUTE_VALUE MUST use SPACE to separate words, brands, series, and model identifiers
+        - Example:
+          - "INTEL CORE I7"
+          - "ATI RADEON"
+          - "LENOVO THINKPAD"
+      - Units of measure MUST remain concatenated WITHOUT SPACE
+        - Example:
+          - "16GB"
+          - "512GB"
+          - "220V"
+          - "50HZ"
+      - Do NOT remove or merge words that are commonly written as separate terms
+      - Alphanumeric product series must remain readable and correctly spaced
 
       OUTPUT RULES:
       - Output MUST be valid JSON only
       - Do NOT include markdown, comments, or explanations
       - Output MUST be a SINGLE flat JSON object
       - Output MUST be in English
-      - Use ATTRIBUTE_NAME exactly as provided (case-sensitive).
-      - ATTRIBUTE_VALUE must be UPPERCASE
-      - ATTRIBUTE_VALUE must include units WITHOUT SPACE
+      - Use ATTRIBUTE_NAME exactly as provided (case-sensitive), BUT SKIP FOR NOUN, MODIFIER, MODIFIER 1, MODIFIER 2, MODIFIER 3
       - If an attribute has no value, set it to null
 
       FINAL OUTPUT SCHEMA (STRICT):
 
       {
-        ${JSON.stringify(nounModifier)}, as object
+        ${JSON.stringify(nounModifier)}, as object, do not change OBJECT VALUE of NOUN, MODIFIER, MODIFIER 1, MODIFIER 2, MODIFIER 3
         "<ATTRIBUTE_NAME>": "<ATTRIBUTE_VALUE or null>",
         "X_CATEGORY": {
           "CATEGORY": "SPAREPART | TOOLS | INVENTORY | ASSET",
           "EXPLANATION": "<EXPLANATION>"
         }
         "X_UNSPC": {
-          "COMMODITY": "<COMMODITY_CODE>"
-          "EXPLANATION": "<EXPLANATION"
+          "COMMODITY": "<COMMODITY_CODE>",
+          "COMMODITY_NAME": "<COMMODITY_NAME>",
+          "SEGMENT": "<SEGMENT_CODE>",
+          "FAMILY": "<FAMILY_CODE>",
+          "CLASS": "<CLASS_CODE>",
+          "EXPLANATION": "<EXPLANATION>"
         }
       }
 
@@ -184,6 +217,51 @@ export async function GET(request: NextRequest) {
 
     try {
       const result = JSON.parse(processedData);
+      if (result.X_UNSPC && result.X_UNSPC.COMMODITY) {
+        const unspsc = await prisma.unspsc.findUnique({
+          where: { code: result.X_UNSPC.COMMODITY },
+        });
+        result.X_UNSPC.COMMODITY_NAME = unspsc ? unspsc.name : null;
+
+        const commodityCode = result.X_UNSPC.COMMODITY;
+        if (commodityCode && commodityCode.length === 8) {
+          result.X_UNSPC.SEGMENT = commodityCode.substring(0, 2) + "000000";
+          result.X_UNSPC.FAMILY = commodityCode.substring(0, 4) + "0000";
+          result.X_UNSPC.CLASS = commodityCode.substring(0, 6) + "00";
+
+          // Fetch names for segment, family, class
+          const segmentUnspsc = await prisma.unspsc.findUnique({
+            where: { code: result.X_UNSPC.SEGMENT },
+          });
+          result.X_UNSPC.SEGMENT_NAME = segmentUnspsc
+            ? segmentUnspsc.name
+            : null;
+
+          const familyUnspsc = await prisma.unspsc.findUnique({
+            where: { code: result.X_UNSPC.FAMILY },
+          });
+          result.X_UNSPC.FAMILY_NAME = familyUnspsc ? familyUnspsc.name : null;
+
+          const classUnspsc = await prisma.unspsc.findUnique({
+            where: { code: result.X_UNSPC.CLASS },
+          });
+          result.X_UNSPC.CLASS_NAME = classUnspsc ? classUnspsc.name : null;
+        }
+
+        // Reorder X_UNSPC fields
+        const reorderedX_UNSPC = {
+          SEGMENT: result.X_UNSPC.SEGMENT,
+          SEGMENT_NAME: result.X_UNSPC.SEGMENT_NAME,
+          FAMILY: result.X_UNSPC.FAMILY,
+          FAMILY_NAME: result.X_UNSPC.FAMILY_NAME,
+          CLASS: result.X_UNSPC.CLASS,
+          CLASS_NAME: result.X_UNSPC.CLASS_NAME,
+          COMMODITY: result.X_UNSPC.COMMODITY,
+          COMMODITY_NAME: result.X_UNSPC.COMMODITY_NAME,
+          EXPLANATION: result.X_UNSPC.EXPLANATION,
+        };
+        result.X_UNSPC = reorderedX_UNSPC;
+      }
       return NextResponse.json(result);
     } catch (parseError) {
       console.error("Error parsing secondary AI response:", parseError);
