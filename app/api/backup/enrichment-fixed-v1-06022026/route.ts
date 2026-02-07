@@ -133,49 +133,7 @@ export async function GET(request: NextRequest) {
           - Explanation with reason must be concise and precise refer to UNSPSC v26.0801
           - Do NOT infer UNSPSC descriptions
           - Only use the provided UNSPSC master data
-          - IF ONLY material is about BOLTS, select ONE the most appropriate UNSPSC COMMODITY CODE:
-            31161601	Anchor bolts
-            31161602	Blind bolts
-            31161603	Carriage bolts
-            31161604	Clevis bolts
-            31161605	Cylinder bolts
-            31161606	Door bolts
-            31161607	Expansion bolts
-            31161608	Lag bolts
-            31161609	Toggle bolts
-            31161610	Eye bolts
-            31161611	Locking bolts
-            31161612	Pin or collar bolts
-            31161613	Tension bolts
-            31161614	Structural bolts
-            31161616	U bolts
-            31161617	Wing bolts
-            31161618	Threaded rod
-            31161619	Stud bolts
-            31161620	Hexagonal bolts
-            31161621	Elevator bolts
-            31161622	Shear bolt
-            31161623	Cable bolt
-            31161624	Resin bolt
-            31161625	Railway track bolt
-            31161626	Sems bolt
-            31161627	Bolt assembly
-            31161628	Square head bolt
-            31161629	Round head bolt
-            31161630	Blank bolt
-            31161631	Shoulder bolt
-            31161632	Rock bolt
-            31161633	Stove bolt
-            31161634	Over neck bolt
-            31161635	Washer assembled bolt
-            31161636	Welding bolt
-            31161637	Socket head bolt
-            31161638	T bolt
-            31161639	Hanger bolt
-            31161640	Hook bolt
-            31161641	Taper shank bolt
-
-          - IF ONLY material is about SPRINGS, select ONE the most appropriate UNSPSC COMMODITY CODE:
+          - IF SPRING, use CLASS 31161900 Springs then select ONE the most appropriate UNSPSC COMMODITY CODE:
             31161901	Helical springs
             31161902	Leaf springs
             31161903	Spiral springs
@@ -189,7 +147,7 @@ export async function GET(request: NextRequest) {
             31161911	Spring assembly
             31161912	Injector valve spring
             IF not suitable for SPRING, choose 31161911	Spring assembly
-
+          - If unsure, return UNSPSC_UNCERTAIN
 
       ATTRIBUTE VALUE FORMATTING RULES (CRITICAL):
       - ATTRIBUTE_VALUE must be in UPPERCASE
@@ -206,7 +164,6 @@ export async function GET(request: NextRequest) {
           - "50HZ"
       - Do NOT remove or merge words that are commonly written as separate terms
       - Alphanumeric product series must remain readable and correctly spaced
-      - If any "REFERENCE TYPE" attribute -> Set the attribute value to null
 
       OUTPUT RULES:
       - Output MUST be valid JSON only
