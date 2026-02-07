@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import { prisma } from "../../../lib/prisma";
+import { prisma } from "@/lib/prisma";
 
 interface Attribute {
   attribute_name: string;
