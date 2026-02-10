@@ -111,6 +111,7 @@ export async function GET(request: NextRequest) {
 
       1. TECHNICAL ATTRIBUTE EXTRACTION
         - Define and extract technical attributes based on ${attributeNames}
+        - DO NOT EXTRACT ATTRIBUTES FROM ${JSON.stringify(nounModifier)}
         - Analyze the material name and extract attributes using:
           a. Explicit information stated in the material name
           b. Implicit information derived from:
@@ -213,14 +214,14 @@ export async function GET(request: NextRequest) {
       - Do NOT include markdown, comments, or explanations
       - Output MUST be a SINGLE flat JSON object
       - Output MUST be in English
-      - Use ATTRIBUTE_NAME exactly as provided (case-sensitive), BUT SKIP FOR NOUN, MODIFIER, MODIFIER 1, MODIFIER 2, MODIFIER 3
+      - Use ATTRIBUTE_NAME exactly as provided (case-sensitive), BUT SKIP FOR "NOUN", "MODIFIER", "MODIFIER 1", "MODIFIER 2", "MODIFIER 3"
       - If an attribute has no value, set it to null
 
       FINAL OUTPUT SCHEMA (STRICT):
 
       {
-        ${JSON.stringify(nounModifier)}, as object, do not change OBJECT VALUE of NOUN, MODIFIER, MODIFIER 1, MODIFIER 2, MODIFIER 3
-        "<ATTRIBUTE_NAME>": "<ATTRIBUTE_VALUE or null>",
+        ${JSON.stringify(nounModifier)}, as object
+        "<ATTRIBUTE_NAME>": "<ATTRIBUTE_VALUE or null>", 
         "X_CATEGORY": {
           "CATEGORY": "SPAREPART | TOOLS | INVENTORY | ASSET",
           "EXPLANATION": "<EXPLANATION>"
