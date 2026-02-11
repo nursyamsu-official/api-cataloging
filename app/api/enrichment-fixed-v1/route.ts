@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // console.log(attributeNames);
+    console.log(attributeNames);
 
     // START NOUN MODIFIER
     const nounModifierAttributes = data?.data?.attributes;
@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
         [item.attribute_name]: item.attribute_value.value,
       }));
 
-    // console.log(nounModifier);
+    console.log(nounModifier);
 
     // END NOUN MODIFIER
 
@@ -110,8 +110,7 @@ export async function GET(request: NextRequest) {
       OBJECTIVES:
 
       1. TECHNICAL ATTRIBUTE EXTRACTION
-        - Define and extract technical attributes based on ${attributeNames}
-        - DO NOT EXTRACT ATTRIBUTES FROM ${JSON.stringify(nounModifier)}
+        - Define and extract technical attributes based on ${attributeNames}, But keep remain Attibute and Attribute value FROM ${JSON.stringify(nounModifier)}
         - Analyze the material name and extract attributes using:
           a. Explicit information stated in the material name
           b. Implicit information derived from:
