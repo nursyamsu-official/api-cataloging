@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    console.log(attributeNames);
+    // console.log(attributeNames);
 
     // START NOUN MODIFIER
     const nounModifierAttributes = data?.data?.attributes;
@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
         [item.attribute_name]: item.attribute_value.value,
       }));
 
-    console.log(nounModifier);
+    // console.log(nounModifier);
 
     // END NOUN MODIFIER
 
