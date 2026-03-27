@@ -28,6 +28,34 @@ function errorResponse(
   );
 }
 
+function normalizeAttributeValue(value: unknown) {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const nullLikeTokens = new Set([
+    "N/A",
+    "NA",
+    "NONE",
+    "NULL",
+    "NOT APPLICABLE",
+    "NOT AVAILABLE",
+    "UNKNOWN",
+    "-",
+  ]);
+
+  return nullLikeTokens.has(trimmed.toUpperCase()) ? null : trimmed;
+}
+
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const material_name = url.searchParams.get("material_name");
@@ -352,6 +380,70 @@ export async function GET(request: NextRequest) {
       },
     );
   }
+
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return errorResponse(
+      "AI_RESPONSE_INVALID_SHAPE",
+      "Enrichment AI response must be a flat JSON object",
+      500,
+    );
+  }
+
+  const aiResult = result as Record<string, unknown>;
+  const excludedAttributeKeys = new Set(forceObjectAttributes);
+  const categoryAttributeAllowlist = new Set(attributeNames);
+
+  const categoryAttributeDefaults = Object.fromEntries(
+    attributeNames
+      .filter((name) => !excludedAttributeKeys.has(name))
+      .map((name) => [name, null]),
+  );
+
+  const normalizedTopLevelAttributes: Record<string, unknown> = {};
+  const potentialNewAttributes: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(aiResult)) {
+    if (key === "X_CATEGORY" || key === "X_UNSPC") {
+      continue;
+    }
+    const normalizedValue = normalizeAttributeValue(value);
+    if (categoryAttributeAllowlist.has(key)) {
+      normalizedTopLevelAttributes[key] = normalizedValue;
+      continue;
+    }
+    potentialNewAttributes[key] = normalizedValue;
+  }
+
+  if (
+    !aiResult.X_CATEGORY ||
+    typeof aiResult.X_CATEGORY !== "object" ||
+    Array.isArray(aiResult.X_CATEGORY)
+  ) {
+    return errorResponse(
+      "AI_RESPONSE_MISSING_X_CATEGORY",
+      "Enrichment AI response is missing X_CATEGORY",
+      500,
+    );
+  }
+
+  if (
+    !aiResult.X_UNSPC ||
+    typeof aiResult.X_UNSPC !== "object" ||
+    Array.isArray(aiResult.X_UNSPC)
+  ) {
+    return errorResponse(
+      "AI_RESPONSE_MISSING_X_UNSPC",
+      "Enrichment AI response is missing X_UNSPC",
+      500,
+    );
+  }
+
+  result = {
+    ...categoryAttributeDefaults,
+    ...normalizedTopLevelAttributes,
+    X_POTENTIAL_NEW_ATTRIBUTES: potentialNewAttributes,
+    X_CATEGORY: aiResult.X_CATEGORY,
+    X_UNSPC: aiResult.X_UNSPC,
+  };
 
   if (result.X_UNSPC && result.X_UNSPC.COMMODITY) {
     try {
