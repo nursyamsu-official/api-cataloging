@@ -255,8 +255,8 @@ export async function GET(request: NextRequest) {
 
   // GET CATEGORY ATTRIBUTES
   let data: any;
+  const fetchUrl = `https://mmkai.ptsisi.id/api/material_categories/get?id=${category_code}`;
   try {
-    const fetchUrl = `https://mmkai.ptsisi.id/api/material_categories/get?id=${category_code}`;
     const controller = new AbortController();
     const timeoutMs = 10_000;
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -273,7 +273,7 @@ export async function GET(request: NextRequest) {
     if (!response.ok) {
       return errorResponse(
         "CATEGORY_API_HTTP_ERROR",
-        "Category API returned a non-success status",
+        `Category API returned a non-success status. See: ${fetchUrl}`,
         response.status === 404 ? 404 : 502,
         { upstreamStatus: response.status, category_code },
       );
@@ -284,7 +284,7 @@ export async function GET(request: NextRequest) {
       console.error("Category API timeout:", error);
       return errorResponse(
         "CATEGORY_API_TIMEOUT",
-        "Category API request timed out",
+        `Category API request timed out. See: ${fetchUrl}`,
         504,
         { category_code },
       );
@@ -293,7 +293,7 @@ export async function GET(request: NextRequest) {
     console.error("Category API request failed:", error);
     return errorResponse(
       "CATEGORY_API_REQUEST_FAILED",
-      "Failed to request category API",
+      `Failed to request category API. See: ${fetchUrl}`,
       502,
       { category_code },
     );
@@ -306,7 +306,9 @@ export async function GET(request: NextRequest) {
     data.success === false
   ) {
     const upstreamMessage =
-      typeof data.message === "string" ? data.message : "Category not found";
+      typeof data.message === "string"
+        ? data.message
+        : `Category not found. See: ${fetchUrl}`;
     return errorResponse("CATEGORY_NOT_FOUND", upstreamMessage, 404, {
       category_code,
     });
@@ -603,12 +605,12 @@ export async function GET(request: NextRequest) {
     }
 
     const normalizedValue = normalizeAttributeValue(value);
-    const mappedCategoryAttributeName =
-      categoryAttributeAllowlist.has(key)
-        ? key
-        : categoryAttributeByNormalizedKey.get(normalizedKey);
+    const mappedCategoryAttributeName = categoryAttributeAllowlist.has(key)
+      ? key
+      : categoryAttributeByNormalizedKey.get(normalizedKey);
     if (mappedCategoryAttributeName) {
-      normalizedTopLevelAttributes[mappedCategoryAttributeName] = normalizedValue;
+      normalizedTopLevelAttributes[mappedCategoryAttributeName] =
+        normalizedValue;
       continue;
     }
     if (normalizedKey) {
@@ -616,7 +618,8 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const fallbackCodeDerivedAttributes = extractCodeDerivedAttributes(material_name);
+  const fallbackCodeDerivedAttributes =
+    extractCodeDerivedAttributes(material_name);
   for (const [fallbackKey, fallbackValue] of Object.entries(
     fallbackCodeDerivedAttributes,
   )) {
