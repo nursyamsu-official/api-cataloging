@@ -10,93 +10,162 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+function errorResponse(
+  code: string,
+  message: string,
+  status: number,
+  details?: Record<string, unknown>,
+) {
+  return NextResponse.json(
+    {
+      error: {
+        code,
+        message,
+        ...(details ? { details } : {}),
+      },
+    },
+    { status },
+  );
+}
+
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const material_name = url.searchParams.get("material_name");
   const category_code = url.searchParams.get("category_code");
 
   if (!material_name || !category_code) {
-    return NextResponse.json(
-      { error: "Missing required parameters: material_name and category_code" },
-      { status: 400 },
+    return errorResponse(
+      "MISSING_PARAMS",
+      "Missing required parameters: material_name and category_code",
+      400,
     );
   }
 
+  // GET CATEGORY ATTRIBUTES
+  let data: any;
   try {
-    // GET CATEGORY ATTRIBUTES
     const fetchUrl = `https://mmkai.ptsisi.id/api/material_categories/get?id=${category_code}`;
-    const response = await fetch(fetchUrl);
+    const controller = new AbortController();
+    const timeoutMs = 10_000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    let response: Response;
+    try {
+      response = await fetch(fetchUrl, {
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      return errorResponse(
+        "CATEGORY_API_HTTP_ERROR",
+        "Category API returned a non-success status",
+        response.status === 404 ? 404 : 502,
+        { upstreamStatus: response.status, category_code },
+      );
     }
-    const data = await response.json();
-    // console.log(data);
-
-    // Extract only attribute_name from the result
-    let attributeNames: string[];
-    if (Array.isArray(data)) {
-      attributeNames = (data as Attribute[]).map((item) => item.attribute_name);
-    } else if (data && Array.isArray(data.data)) {
-      attributeNames = (data.data as Attribute[]).map(
-        (item) => item.attribute_name,
-      );
-    } else if (data && data.data && Array.isArray(data.data.attributes)) {
-      attributeNames = (data.data.attributes as Attribute[]).map(
-        (item) => item.attribute_name,
-      );
-    } else if (data && Array.isArray(data.attributes)) {
-      attributeNames = (data.attributes as Attribute[]).map(
-        (item) => item.attribute_name,
-      );
-    } else if (data && Array.isArray(data.attribute_name)) {
-      attributeNames = data.attribute_name as string[];
-    } else {
-      return NextResponse.json(
-        {
-          error: "Invalid data format",
-        },
-        { status: 500 },
+    data = await response.json();
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      console.error("Category API timeout:", error);
+      return errorResponse(
+        "CATEGORY_API_TIMEOUT",
+        "Category API request timed out",
+        504,
+        { category_code },
       );
     }
 
-    // console.log(attributeNames);
+    console.error("Category API request failed:", error);
+    return errorResponse(
+      "CATEGORY_API_REQUEST_FAILED",
+      "Failed to request category API",
+      502,
+      { category_code },
+    );
+  }
 
-    // START NOUN MODIFIER
-    const nounModifierAttributes = data?.data?.attributes;
+  if (
+    data &&
+    typeof data === "object" &&
+    "success" in data &&
+    data.success === false
+  ) {
+    const upstreamMessage =
+      typeof data.message === "string" ? data.message : "Category not found";
+    return errorResponse("CATEGORY_NOT_FOUND", upstreamMessage, 404, {
+      category_code,
+    });
+  }
 
-    if (!Array.isArray(nounModifierAttributes)) {
-      return NextResponse.json(
-        { error: "Invalid data format" },
-        { status: 500 },
-      );
-    }
+  // Extract only attribute_name from the result
+  let attributeNames: string[];
+  if (Array.isArray(data)) {
+    attributeNames = (data as Attribute[]).map((item) => item.attribute_name);
+  } else if (data && Array.isArray(data.data)) {
+    attributeNames = (data.data as Attribute[]).map(
+      (item) => item.attribute_name,
+    );
+  } else if (data && data.data && Array.isArray(data.data.attributes)) {
+    attributeNames = (data.data.attributes as Attribute[]).map(
+      (item) => item.attribute_name,
+    );
+  } else if (data && Array.isArray(data.attributes)) {
+    attributeNames = (data.attributes as Attribute[]).map(
+      (item) => item.attribute_name,
+    );
+  } else if (data && Array.isArray(data.attribute_name)) {
+    attributeNames = data.attribute_name as string[];
+  } else {
+    return errorResponse(
+      "CATEGORY_DATA_INVALID",
+      "Category API returned invalid data format",
+      502,
+      { category_code },
+    );
+  }
+  console.log(attributeNames);
 
-    const forceObjectAttributes = [
-      "NOUN",
-      "MODIFIER",
-      "MODIFIER 1",
-      "MODIFIER 2",
-      "MODIFIER 3",
-    ];
+  // START NOUN MODIFIER
+  const nounModifierAttributes = data?.data?.attributes;
 
-    // ambil hanya attribute yang masuk whitelist
-    const nounModifier = nounModifierAttributes
-      .filter(
-        (item: any) =>
-          forceObjectAttributes.includes(item.attribute_name) &&
-          item.attribute_value?.value,
-      )
-      // mapping ke object key-value
-      .map((item: any) => ({
-        [item.attribute_name]: item.attribute_value.value,
-      }));
+  if (!Array.isArray(nounModifierAttributes)) {
+    return errorResponse(
+      "CATEGORY_DATA_INVALID",
+      "Category attributes are missing or invalid",
+      502,
+      { category_code },
+    );
+  }
 
-    // console.log(nounModifier);
+  const forceObjectAttributes = [
+    "NOUN",
+    "MODIFIER",
+    "MODIFIER 1",
+    "MODIFIER 2",
+    "MODIFIER 3",
+  ];
 
-    // END NOUN MODIFIER
+  // ambil hanya attribute yang masuk whitelist
+  const nounModifier = nounModifierAttributes
+    .filter(
+      (item: any) =>
+        forceObjectAttributes.includes(item.attribute_name) &&
+        item.attribute_value?.value,
+    )
+    // mapping ke object key-value
+    .map((item: any) => ({
+      [item.attribute_name]: item.attribute_value.value,
+    }));
 
-    // FIRST AI processing: breakdown attribute data
-    const systemPrompt = `
+  // console.log(nounModifier);
+
+  // END NOUN MODIFIER
+
+  // FIRST AI processing: breakdown attribute data
+  const systemPrompt = `
       You are an expert material master data engineer specialized in railway industry materials and UNSPSC classification.
 
       Your task is to normalize, enrich, and classify a material name into structured technical attributes, category, and UNSPSC code.
@@ -237,9 +306,11 @@ export async function GET(request: NextRequest) {
 
     `;
 
-    // console.log(systemPrompt);
+  // console.log(systemPrompt);
 
-    const completion = await openai.chat.completions.create({
+  let completion: OpenAI.Chat.Completions.ChatCompletion;
+  try {
+    completion = await openai.chat.completions.create({
       model: "gpt-5.2",
       messages: [
         { role: "system", content: systemPrompt },
@@ -247,77 +318,92 @@ export async function GET(request: NextRequest) {
       ],
       temperature: 0.0,
     });
-
-    const processedData = completion.choices[0].message.content;
-    // console.log(processedData);
-
-    if (!processedData) {
-      return NextResponse.json(
-        { error: "No response from Enrichment AI" },
-        { status: 500 },
-      );
-    }
-
-    try {
-      const result = JSON.parse(processedData);
-      if (result.X_UNSPC && result.X_UNSPC.COMMODITY) {
-        const unspsc = await prisma.unspsc.findUnique({
-          where: { code: result.X_UNSPC.COMMODITY },
-        });
-        result.X_UNSPC.COMMODITY_NAME = unspsc ? unspsc.name : null;
-
-        const commodityCode = result.X_UNSPC.COMMODITY;
-        if (commodityCode && commodityCode.length === 8) {
-          result.X_UNSPC.SEGMENT = commodityCode.substring(0, 2) + "000000";
-          result.X_UNSPC.FAMILY = commodityCode.substring(0, 4) + "0000";
-          result.X_UNSPC.CLASS = commodityCode.substring(0, 6) + "00";
-
-          // Fetch names for segment, family, class
-          const segmentUnspsc = await prisma.unspsc.findUnique({
-            where: { code: result.X_UNSPC.SEGMENT },
-          });
-          result.X_UNSPC.SEGMENT_NAME = segmentUnspsc
-            ? segmentUnspsc.name
-            : null;
-
-          const familyUnspsc = await prisma.unspsc.findUnique({
-            where: { code: result.X_UNSPC.FAMILY },
-          });
-          result.X_UNSPC.FAMILY_NAME = familyUnspsc ? familyUnspsc.name : null;
-
-          const classUnspsc = await prisma.unspsc.findUnique({
-            where: { code: result.X_UNSPC.CLASS },
-          });
-          result.X_UNSPC.CLASS_NAME = classUnspsc ? classUnspsc.name : null;
-        }
-
-        // Reorder X_UNSPC fields
-        const reorderedX_UNSPC = {
-          SEGMENT: result.X_UNSPC.SEGMENT,
-          SEGMENT_NAME: result.X_UNSPC.SEGMENT_NAME,
-          FAMILY: result.X_UNSPC.FAMILY,
-          FAMILY_NAME: result.X_UNSPC.FAMILY_NAME,
-          CLASS: result.X_UNSPC.CLASS,
-          CLASS_NAME: result.X_UNSPC.CLASS_NAME,
-          COMMODITY: result.X_UNSPC.COMMODITY,
-          COMMODITY_NAME: result.X_UNSPC.COMMODITY_NAME,
-          EXPLANATION: result.X_UNSPC.EXPLANATION,
-        };
-        result.X_UNSPC = reorderedX_UNSPC;
-      }
-      return NextResponse.json(result);
-    } catch (parseError) {
-      console.error("Error parsing secondary AI response:", parseError);
-      return NextResponse.json(
-        { error: "Failed to process enrichment data" },
-        { status: 500 },
-      );
-    }
   } catch (error) {
-    console.error("Error fetching material categories:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch material categories" },
-      { status: 500 },
+    console.error("OpenAI request failed:", error);
+    return errorResponse(
+      "OPENAI_REQUEST_FAILED",
+      "Failed to process enrichment via OpenAI",
+      502,
     );
   }
+
+  const processedData = completion.choices[0]?.message?.content;
+  // console.log(processedData);
+
+  if (!processedData) {
+    return errorResponse(
+      "AI_EMPTY_RESPONSE",
+      "No response from enrichment AI",
+      502,
+    );
+  }
+
+  let result: any;
+  try {
+    result = JSON.parse(processedData);
+  } catch (parseError) {
+    console.error("Error parsing secondary AI response:", parseError);
+    return errorResponse(
+      "AI_RESPONSE_INVALID_JSON",
+      "Failed to parse enrichment AI response as JSON",
+      500,
+      {
+        preview: processedData.slice(0, 200),
+      },
+    );
+  }
+
+  if (result.X_UNSPC && result.X_UNSPC.COMMODITY) {
+    try {
+      const unspsc = await prisma.unspsc.findUnique({
+        where: { code: result.X_UNSPC.COMMODITY },
+      });
+      result.X_UNSPC.COMMODITY_NAME = unspsc ? unspsc.name : null;
+
+      const commodityCode = result.X_UNSPC.COMMODITY;
+      if (commodityCode && commodityCode.length === 8) {
+        result.X_UNSPC.SEGMENT = commodityCode.substring(0, 2) + "000000";
+        result.X_UNSPC.FAMILY = commodityCode.substring(0, 4) + "0000";
+        result.X_UNSPC.CLASS = commodityCode.substring(0, 6) + "00";
+
+        // Fetch names for segment, family, class
+        const segmentUnspsc = await prisma.unspsc.findUnique({
+          where: { code: result.X_UNSPC.SEGMENT },
+        });
+        result.X_UNSPC.SEGMENT_NAME = segmentUnspsc ? segmentUnspsc.name : null;
+
+        const familyUnspsc = await prisma.unspsc.findUnique({
+          where: { code: result.X_UNSPC.FAMILY },
+        });
+        result.X_UNSPC.FAMILY_NAME = familyUnspsc ? familyUnspsc.name : null;
+
+        const classUnspsc = await prisma.unspsc.findUnique({
+          where: { code: result.X_UNSPC.CLASS },
+        });
+        result.X_UNSPC.CLASS_NAME = classUnspsc ? classUnspsc.name : null;
+      }
+
+      // Reorder X_UNSPC fields
+      const reorderedX_UNSPC = {
+        SEGMENT: result.X_UNSPC.SEGMENT,
+        SEGMENT_NAME: result.X_UNSPC.SEGMENT_NAME,
+        FAMILY: result.X_UNSPC.FAMILY,
+        FAMILY_NAME: result.X_UNSPC.FAMILY_NAME,
+        CLASS: result.X_UNSPC.CLASS,
+        CLASS_NAME: result.X_UNSPC.CLASS_NAME,
+        COMMODITY: result.X_UNSPC.COMMODITY,
+        COMMODITY_NAME: result.X_UNSPC.COMMODITY_NAME,
+        EXPLANATION: result.X_UNSPC.EXPLANATION,
+      };
+      result.X_UNSPC = reorderedX_UNSPC;
+    } catch (error) {
+      console.error("UNSPSC lookup failed:", error);
+      return errorResponse(
+        "UNSPSC_LOOKUP_FAILED",
+        "Failed to enrich UNSPSC hierarchy",
+        500,
+      );
+    }
+  }
+  return NextResponse.json(result);
 }
