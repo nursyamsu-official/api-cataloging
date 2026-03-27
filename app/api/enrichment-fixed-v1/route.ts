@@ -56,6 +56,190 @@ function normalizeAttributeValue(value: unknown) {
   return nullLikeTokens.has(trimmed.toUpperCase()) ? null : trimmed;
 }
 
+function normalizeAttributeKey(key: string) {
+  return key
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+}
+
+function isLikelyCodeToken(token: string) {
+  if (!token) {
+    return false;
+  }
+
+  const cleanedToken = token
+    .toUpperCase()
+    .replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g, "");
+  if (cleanedToken.length < 4) {
+    return false;
+  }
+
+  if (!/^[A-Z0-9./-]+$/.test(cleanedToken)) {
+    return false;
+  }
+
+  return /\d/.test(cleanedToken);
+}
+
+const codeDerivedKeyPriority = [
+  "PART_NUMBER",
+  "INTERNAL_NUMBER",
+  "SERIES",
+  "CODE",
+] as const;
+
+const codeDerivedKeySet = new Set<string>(codeDerivedKeyPriority);
+
+function getConfidentCodeValue(value: unknown) {
+  const normalizedValue = normalizeAttributeValue(value);
+  if (normalizedValue == null) {
+    return null;
+  }
+
+  const stringValue = String(normalizedValue).trim().toUpperCase();
+  if (!stringValue) {
+    return null;
+  }
+
+  return isLikelyCodeToken(stringValue) ? stringValue : null;
+}
+
+function pickSingleCodeDerivedAttribute(
+  attributes: Record<string, unknown>,
+): Record<string, unknown> {
+  const selectedCodeAttribute: Record<string, unknown> = {};
+
+  for (const key of codeDerivedKeyPriority) {
+    if (!(key in attributes)) {
+      continue;
+    }
+
+    const confidentCodeValue = getConfidentCodeValue(attributes[key]);
+    if (confidentCodeValue == null) {
+      continue;
+    }
+
+    selectedCodeAttribute[key] = confidentCodeValue;
+    break;
+  }
+
+  return selectedCodeAttribute;
+}
+
+function enforceSingleOptionalCodeDerivedAttribute(
+  attributes: Record<string, unknown>,
+) {
+  const nonCodeAttributes: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(attributes)) {
+    if (!codeDerivedKeySet.has(key)) {
+      nonCodeAttributes[key] = value;
+    }
+  }
+
+  return {
+    ...nonCodeAttributes,
+    ...pickSingleCodeDerivedAttribute(attributes),
+  };
+}
+
+function mapCodeLabelToAttributeKey(label: string) {
+  const normalizedLabel = normalizeAttributeKey(label);
+
+  if (
+    normalizedLabel === "PART" ||
+    normalizedLabel === "PART_NO" ||
+    normalizedLabel === "PART_NUMBER" ||
+    normalizedLabel === "P_N" ||
+    normalizedLabel === "PN"
+  ) {
+    return "PART_NUMBER";
+  }
+
+  if (
+    normalizedLabel === "INTERNAL" ||
+    normalizedLabel === "INTERNAL_NO" ||
+    normalizedLabel === "INTERNAL_NUMBER"
+  ) {
+    return "INTERNAL_NUMBER";
+  }
+
+  if (normalizedLabel === "SERIES") {
+    return "SERIES";
+  }
+
+  if (normalizedLabel === "CODE") {
+    return "CODE";
+  }
+
+  return null;
+}
+
+function extractCodeDerivedAttributes(materialName: string) {
+  const extracted: Record<string, string> = {};
+  const normalizedMaterialName = materialName.toUpperCase();
+
+  const labeledCodeRegex =
+    /\b(PART(?:\s*(?:NO|NUMBER))?|P\/N|PN|CODE|SERIES|INTERNAL(?:\s*(?:NO|NUMBER))?)\b\s*[:#=\-]?\s*([A-Z0-9][A-Z0-9./-]{2,})/g;
+  for (const match of normalizedMaterialName.matchAll(labeledCodeRegex)) {
+    const rawLabel = match[1];
+    const rawValue = match[2];
+    const mappedKey = mapCodeLabelToAttributeKey(rawLabel);
+    const cleanedValue = rawValue?.trim();
+    if (!mappedKey || !cleanedValue || !isLikelyCodeToken(cleanedValue)) {
+      continue;
+    }
+    extracted[mappedKey] = cleanedValue;
+  }
+
+  // A common pattern in incoming names is "DESC; CODE".
+  const separatorSegments = normalizedMaterialName
+    .split(/[;|]/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (separatorSegments.length > 1) {
+    for (const segment of separatorSegments.slice(1)) {
+      const segmentValue = segment.replace(/\s+/g, " ").trim();
+      if (!segmentValue) {
+        continue;
+      }
+
+      const segmentParts = segmentValue.split(" ").filter(Boolean);
+      if (segmentParts.length !== 1) {
+        continue;
+      }
+
+      const codeCandidate = segmentParts[0];
+      if (!isLikelyCodeToken(codeCandidate)) {
+        continue;
+      }
+
+      if (!extracted.PART_NUMBER) {
+        extracted.PART_NUMBER = codeCandidate;
+      }
+    }
+  }
+
+  if (!extracted.PART_NUMBER && !extracted.CODE && !extracted.SERIES) {
+    const genericTokens =
+      normalizedMaterialName.match(/\b[A-Z0-9][A-Z0-9./-]{4,}\b/g) ?? [];
+    const genericCodeCandidate = genericTokens.find((token) =>
+      isLikelyCodeToken(token),
+    );
+    if (genericCodeCandidate) {
+      if (/^\d{6,}$/.test(genericCodeCandidate)) {
+        extracted.PART_NUMBER = genericCodeCandidate;
+      } else if (!extracted.CODE) {
+        extracted.CODE = genericCodeCandidate;
+      }
+    }
+  }
+
+  return pickSingleCodeDerivedAttribute(extracted) as Record<string, string>;
+}
+
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const material_name = url.searchParams.get("material_name");
@@ -208,12 +392,15 @@ export async function GET(request: NextRequest) {
 
       1. TECHNICAL ATTRIBUTE EXTRACTION
         - Define and extract technical attributes based on ${attributeNames}, But keep remain Attibute and Attribute value FROM ${JSON.stringify(nounModifier)}
+        - You MAY add additional non-category technical attributes when clearly present in material_name.
         - Analyze the material name and extract attributes using:
           a. Explicit information stated in the material name
           b. Implicit information derived from:
               - Part numbering conventions
               - International standards (ISO, DIN, ANSI, JIS)
               - Common mechanical & electrical engineering rules
+        - For code-derived information, choose ONLY ONE most-appropriate key among PART_NUMBER, CODE, SERIES, INTERNAL_NUMBER, and skip all four if not needed.
+        - Other reusable technical definitions are still allowed when confidently identified.
 
       2. CATEGORY CLASSIFICATION (RAILWAY INDUSTRY CONTEXT)
         - Determine ONE most appropriate category:
@@ -311,6 +498,7 @@ export async function GET(request: NextRequest) {
       - Output MUST be a SINGLE flat JSON object
       - Output MUST be in English
       - Use ATTRIBUTE_NAME exactly as provided (case-sensitive), BUT SKIP FOR "NOUN", "MODIFIER", "MODIFIER 1", "MODIFIER 2", "MODIFIER 3"
+      - You MAY include additional technical keys not present in category attributes if they are confidently detected from the material name/code.
       - If an attribute has no value, set it to null
 
       FINAL OUTPUT SCHEMA (STRICT):
@@ -392,6 +580,9 @@ export async function GET(request: NextRequest) {
   const aiResult = result as Record<string, unknown>;
   const excludedAttributeKeys = new Set(forceObjectAttributes);
   const categoryAttributeAllowlist = new Set(attributeNames);
+  const categoryAttributeByNormalizedKey = new Map<string, string>(
+    attributeNames.map((name) => [normalizeAttributeKey(name), name]),
+  );
 
   const categoryAttributeDefaults = Object.fromEntries(
     attributeNames
@@ -402,21 +593,62 @@ export async function GET(request: NextRequest) {
   const normalizedTopLevelAttributes: Record<string, unknown> = {};
   const potentialNewAttributes: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(aiResult)) {
-    if (key === "X_CATEGORY" || key === "X_UNSPC") {
+    const normalizedKey = normalizeAttributeKey(key);
+    if (
+      normalizedKey === "X_CATEGORY" ||
+      normalizedKey === "X_UNSPC" ||
+      normalizedKey === "X_POTENTIAL_NEW_ATTRIBUTES"
+    ) {
       continue;
     }
+
     const normalizedValue = normalizeAttributeValue(value);
-    if (categoryAttributeAllowlist.has(key)) {
-      normalizedTopLevelAttributes[key] = normalizedValue;
+    const mappedCategoryAttributeName =
+      categoryAttributeAllowlist.has(key)
+        ? key
+        : categoryAttributeByNormalizedKey.get(normalizedKey);
+    if (mappedCategoryAttributeName) {
+      normalizedTopLevelAttributes[mappedCategoryAttributeName] = normalizedValue;
       continue;
     }
-    potentialNewAttributes[key] = normalizedValue;
+    if (normalizedKey) {
+      potentialNewAttributes[normalizedKey] = normalizedValue;
+    }
   }
 
+  const fallbackCodeDerivedAttributes = extractCodeDerivedAttributes(material_name);
+  for (const [fallbackKey, fallbackValue] of Object.entries(
+    fallbackCodeDerivedAttributes,
+  )) {
+    const normalizedFallbackKey = normalizeAttributeKey(fallbackKey);
+    if (!normalizedFallbackKey) {
+      continue;
+    }
+    if (categoryAttributeByNormalizedKey.has(normalizedFallbackKey)) {
+      continue;
+    }
+
+    const normalizedFallbackValue = normalizeAttributeValue(fallbackValue);
+    const hasExistingNonNullValue =
+      normalizedFallbackKey in potentialNewAttributes &&
+      potentialNewAttributes[normalizedFallbackKey] != null;
+    if (hasExistingNonNullValue) {
+      continue;
+    }
+    potentialNewAttributes[normalizedFallbackKey] = normalizedFallbackValue;
+  }
+  const finalizedPotentialNewAttributes =
+    enforceSingleOptionalCodeDerivedAttribute(potentialNewAttributes);
+
+  const xCategoryValue =
+    aiResult.X_CATEGORY ??
+    Object.entries(aiResult).find(
+      ([key]) => normalizeAttributeKey(key) === "X_CATEGORY",
+    )?.[1];
   if (
-    !aiResult.X_CATEGORY ||
-    typeof aiResult.X_CATEGORY !== "object" ||
-    Array.isArray(aiResult.X_CATEGORY)
+    !xCategoryValue ||
+    typeof xCategoryValue !== "object" ||
+    Array.isArray(xCategoryValue)
   ) {
     return errorResponse(
       "AI_RESPONSE_MISSING_X_CATEGORY",
@@ -425,10 +657,15 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const xUnspcValue =
+    aiResult.X_UNSPC ??
+    Object.entries(aiResult).find(
+      ([key]) => normalizeAttributeKey(key) === "X_UNSPC",
+    )?.[1];
   if (
-    !aiResult.X_UNSPC ||
-    typeof aiResult.X_UNSPC !== "object" ||
-    Array.isArray(aiResult.X_UNSPC)
+    !xUnspcValue ||
+    typeof xUnspcValue !== "object" ||
+    Array.isArray(xUnspcValue)
   ) {
     return errorResponse(
       "AI_RESPONSE_MISSING_X_UNSPC",
@@ -440,9 +677,9 @@ export async function GET(request: NextRequest) {
   result = {
     ...categoryAttributeDefaults,
     ...normalizedTopLevelAttributes,
-    X_POTENTIAL_NEW_ATTRIBUTES: potentialNewAttributes,
-    X_CATEGORY: aiResult.X_CATEGORY,
-    X_UNSPC: aiResult.X_UNSPC,
+    X_POTENTIAL_NEW_ATTRIBUTES: finalizedPotentialNewAttributes,
+    X_CATEGORY: xCategoryValue,
+    X_UNSPC: xUnspcValue,
   };
 
   if (result.X_UNSPC && result.X_UNSPC.COMMODITY) {
