@@ -10,6 +10,8 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const CATEGORY_CACHE_REVALIDATE_SECONDS = 86400;
+
 function errorResponse(
   code: string,
   message: string,
@@ -265,6 +267,10 @@ export async function GET(request: NextRequest) {
     try {
       response = await fetch(fetchUrl, {
         signal: controller.signal,
+        next: {
+          revalidate: CATEGORY_CACHE_REVALIDATE_SECONDS,
+          tags: ["material-category", `material-category:${category_code}`],
+        },
       });
     } finally {
       clearTimeout(timeoutId);
