@@ -54,7 +54,7 @@ async function upsertBatch(items: MaterialCategoryRow[]) {
   }
 }
 
-export async function POST() {
+async function runSync() {
   try {
     let pagesProcessed = 0;
     let rowsUpserted = 0;
@@ -96,4 +96,12 @@ export async function POST() {
       { status: 500 }
     );
   }
+}
+
+export async function GET() {
+  return runSync();
+}
+
+export async function POST() {
+  return runSync();
 }
