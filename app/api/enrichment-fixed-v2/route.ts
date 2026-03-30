@@ -10,7 +10,34 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const CATEGORY_CACHE_REVALIDATE_SECONDS = 86400;
+function resolveAttributeRecordsArray(data: unknown): unknown[] | null {
+  if (Array.isArray(data)) {
+    return data;
+  }
+  if (data == null || typeof data !== "object") {
+    return null;
+  }
+  const d = data as Record<string, unknown>;
+  const nested = d.data;
+  if (
+    nested &&
+    typeof nested === "object" &&
+    !Array.isArray(nested) &&
+    "attributes" in nested
+  ) {
+    const attrs = (nested as { attributes?: unknown }).attributes;
+    if (Array.isArray(attrs)) {
+      return attrs;
+    }
+  }
+  if (Array.isArray(d.attributes)) {
+    return d.attributes;
+  }
+  if (Array.isArray(nested)) {
+    return nested;
+  }
+  return null;
+}
 
 function errorResponse(
   code: string,
@@ -255,70 +282,30 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // GET CATEGORY ATTRIBUTES
-  let data: any;
-  const fetchUrl = `https://mmkai.ptsisi.id/api/material_categories/get?id=${category_code}`;
-  try {
-    const controller = new AbortController();
-    const timeoutMs = 10_000;
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  // GET CATEGORY ATTRIBUTES (from Prisma)
+  const row = await prisma.materialCategory.findUnique({
+    where: { id: category_code },
+  });
 
-    let response: Response;
-    try {
-      response = await fetch(fetchUrl, {
-        signal: controller.signal,
-        next: {
-          revalidate: CATEGORY_CACHE_REVALIDATE_SECONDS,
-          tags: ["material-category", `material-category:${category_code}`],
-        },
-      });
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    if (!response.ok) {
-      return errorResponse(
-        "CATEGORY_API_HTTP_ERROR",
-        `Category API returned a non-success status. See: ${fetchUrl}`,
-        response.status === 404 ? 404 : 502,
-        { upstreamStatus: response.status, category_code },
-      );
-    }
-    data = await response.json();
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      console.error("Category API timeout:", error);
-      return errorResponse(
-        "CATEGORY_API_TIMEOUT",
-        `Category API request timed out. See: ${fetchUrl}`,
-        504,
-        { category_code },
-      );
-    }
-
-    console.error("Category API request failed:", error);
+  if (!row) {
     return errorResponse(
-      "CATEGORY_API_REQUEST_FAILED",
-      `Failed to request category API. See: ${fetchUrl}`,
+      "CATEGORY_NOT_FOUND",
+      `No material category found for id: ${category_code}`,
+      404,
+      { category_code },
+    );
+  }
+
+  if (row.attributes == null) {
+    return errorResponse(
+      "CATEGORY_DATA_INVALID",
+      "Material category has no attributes stored",
       502,
       { category_code },
     );
   }
 
-  if (
-    data &&
-    typeof data === "object" &&
-    "success" in data &&
-    data.success === false
-  ) {
-    const upstreamMessage =
-      typeof data.message === "string"
-        ? data.message
-        : `Category not found. See: ${fetchUrl}`;
-    return errorResponse("CATEGORY_NOT_FOUND", upstreamMessage, 404, {
-      category_code,
-    });
-  }
+  const data: any = row.attributes;
 
   // Extract only attribute_name from the result
   let attributeNames: string[];
@@ -341,7 +328,7 @@ export async function GET(request: NextRequest) {
   } else {
     return errorResponse(
       "CATEGORY_DATA_INVALID",
-      "Category API returned invalid data format",
+      "Stored category attributes have an invalid data format",
       502,
       { category_code },
     );
@@ -349,7 +336,7 @@ export async function GET(request: NextRequest) {
   console.log(attributeNames);
 
   // START NOUN MODIFIER
-  const nounModifierAttributes = data?.data?.attributes;
+  const nounModifierAttributes = resolveAttributeRecordsArray(data);
 
   if (!Array.isArray(nounModifierAttributes)) {
     return errorResponse(
