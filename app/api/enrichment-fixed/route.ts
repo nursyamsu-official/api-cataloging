@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { requireApiKey } from "../../../lib/require-api-key";
 
 interface Attribute {
   attribute_name: string;
@@ -10,6 +11,11 @@ const openai = new OpenAI({
 });
 
 export async function GET(request: NextRequest) {
+  const authError = requireApiKey(request, (_code, message, status) =>
+    NextResponse.json({ error: message }, { status }),
+  );
+  if (authError) return authError;
+
   const url = new URL(request.url);
   const material_name = url.searchParams.get("material_name");
   const category_code = url.searchParams.get("category_code");

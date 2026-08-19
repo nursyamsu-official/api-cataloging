@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { requireApiKey } from "../../../lib/require-api-key";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
 export async function GET(request: NextRequest) {
+  const authError = requireApiKey(request, (_code, message, status) =>
+    NextResponse.json({ error: message }, { status }),
+  );
+  if (authError) return authError;
+
   const url = new URL(request.url);
   const material_name = url.searchParams.get("material_name");
 

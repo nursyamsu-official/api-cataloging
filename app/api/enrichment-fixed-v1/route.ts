@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { prisma } from "../../../lib/prisma";
+import { requireApiKey } from "../../../lib/require-api-key";
 
 interface Attribute {
   attribute_name: string;
@@ -243,6 +244,9 @@ function extractCodeDerivedAttributes(materialName: string) {
 }
 
 export async function GET(request: NextRequest) {
+  const authError = requireApiKey(request, errorResponse);
+  if (authError) return authError;
+
   const url = new URL(request.url);
   const material_name = url.searchParams.get("material_name");
   const category_code = url.searchParams.get("category_code");
